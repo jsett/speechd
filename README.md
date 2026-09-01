@@ -28,6 +28,7 @@ These speech syntheses are supported:
 - ESpeak/ESpeak-NG
 - Festival
 - Flite
+- Fono
 - IBMTTS / voxin
 - Ivona
 - Kali
