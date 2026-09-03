@@ -56,6 +56,7 @@ if test "$enable_libs_only" = "yes"; then
 	with_baratinoo=no
 	with_kali=no
 	with_piper=no
+	with_generic_python=no
 
 	with_pulse=no
 	with_alsa=no
@@ -424,6 +425,29 @@ AS_IF([test $with_kali = yes -o $with_kali = check],
 AM_CONDITIONAL([kali_support], [test $with_kali != no])
 AM_CONDITIONAL([kali_shim], [test $with_kali = shim])
 AS_IF([test $with_kali != no], [output_modules="${output_modules} kali"])
+
+# check for GenericPython support
+AC_ARG_WITH([GenericPython],
+  [AS_HELP_STRING([--with-GenericPython], [Compile with GenericPython support])],
+  [],
+  [with_GenericPython=check])
+AS_IF([test $with_GenericPython != "no"],
+  [PKG_CHECK_MODULES([PYTHON], [python3-embed],
+      [genericpython_python="yes"],
+      [AS_IF([test $with_GenericPython = "yes"],
+        [AC_MSG_FAILURE([python3-embed is not available])])])
+   PKG_CHECK_MODULES([LIBXML], [libxml-2.0],
+      [genericpython_libxml="yes"],
+      [AS_IF([test $with_GenericPython = "yes"],
+        [AC_MSG_FAILURE([libxml-2.0 is not available])])])
+   AS_IF([test "x$genericpython_python" = "xyes" -a "x$genericpython_libxml" = "xyes"],
+     [with_GenericPython="yes"])])
+AM_CONDITIONAL([GenericPython_support], [test $with_GenericPython = "yes"])
+AC_SUBST([PYTHON_CFLAGS])
+AC_SUBST([PYTHON_LIBS])
+AC_SUBST([LIBXML_CFLAGS])
+AC_SUBST([LIBXML_LIBS])
+AS_IF([test $with_GenericPython = "yes"], [output_modules="${output_modules} GenericPython"])
 
 # check for piper support
 AC_ARG_WITH([piper],

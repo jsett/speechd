@@ -22,6 +22,7 @@ EXTRA_DIST += kali_Kali_shim.cpp kali_KGlobal_shim.cpp kali_KTrans_shim.cpp kali
 EXTRA_DIST += ibmtts_shim.c eci.h
 EXTRA_DIST += voxin_shim.c voxin.h
 EXTRA_DIST += module_utils.h
+EXTRA_DIST += GenericPython.h
 EXTRA_DIST += dummy-message-default.wav
 EXTRA_DIST += dummy-message.txt
 CLEANFILES = dummy-message.wav
@@ -131,6 +132,16 @@ sd_flite_SOURCES = flite.c $(common_SOURCES)
 sd_flite_LDADD = $(top_builddir)/src/common/libcommon.la \
 	$(flite_voices) $(flite_basic) \
 	$(common_LDADD)
+endif
+
+#
+# GenericPython module
+#
+if GenericPython_support
+modulebin_PROGRAMS += sd_GenericPython
+sd_GenericPython_SOURCES = GenericPython_server.c GenericPython_worker.c GenericPython_client.c
+sd_GenericPython_CFLAGS = $(ESPEAK_NG_CFLAGS) $(GLIB_CFLAGS) $(LIBONNXRUNTIME_CFLAGS) $(LIBXML_CFLAGS) $(DOTCONF_CFLAGS) $(PYTHON_CFLAGS)
+sd_GenericPython_LDADD = $(top_builddir)/src/common/libcommon_la-common.o libspeechd_module.la $(ESPEAK_NG_LIBS) $(EXTRA_ESPEAK_LIBS) $(GLIB_LIBS) $(LIBONNXRUNTIME_LIBS) $(LIBXML_LIBS) $(DOTCONF_LIBS) $(PYTHON_LIBS)
 endif
 
 #
