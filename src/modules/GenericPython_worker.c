@@ -58,7 +58,9 @@ int model_change_voice(const char *var, const char *val){
     g_mutex_lock(&model_mutex);
 
     // This will be sent to python to handle.
+    PyEval_RestoreThread(server_tstate);
     call_change_voice_method(val);
+    PyEval_SaveThread();
 
     g_mutex_unlock(&model_mutex);
 }
@@ -74,7 +76,9 @@ int model_change_speed(const char *var, const char *val){
     int result = (int)int_val;
 
     // This will be sent to python to handle.
+    PyEval_RestoreThread(server_tstate);
     call_change_speed_method(result);
+    PyEval_SaveThread();
 
     g_mutex_unlock(&model_mutex);
 }
@@ -237,7 +241,9 @@ int model_generate_speech(const char *data, size_t bytes){
     send_wav_start();
 
     // have python handle this.
-    call_speak_method(data);
+    PyEval_RestoreThread(worker_tstate);
+    call_speak_method(data, bytes);
+    PyEval_SaveThread();
 
     send_wav_end();
 

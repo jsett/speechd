@@ -10,9 +10,8 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-#include <stdio.h>
-#include <glib.h>
 #include <Python.h>
+#include <glib.h>
 #include <libxml/parser.h>
 #include <libxml/tree.h>
 #include "module_utils.h"
@@ -23,6 +22,10 @@ extern bool debug_module;
 
 extern GString *venv_path;
 extern GString *source_path;
+
+extern PyThreadState *main_tstate;
+extern PyThreadState *server_tstate;
+extern PyThreadState *worker_tstate;
 
 #define DEBUG_PRINT(...) \
     do { \
@@ -53,4 +56,4 @@ int setup_python();
 int call_change_speed_method(int speed);
 int call_change_voice_method(const char* voice);
 int call_list_voices_method();
-int call_speak_method(const char* text);
+int call_speak_method(const char* text, size_t bytes);

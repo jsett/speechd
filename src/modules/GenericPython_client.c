@@ -12,6 +12,11 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
 
 #include "GenericPython.h"
 
+// This holds our thread state.
+PyThreadState *main_tstate;
+PyThreadState *server_tstate;
+PyThreadState *worker_tstate;
+
 // Global storage for the retained reference
 static PyObject* pSpeechDispatchClassInstance = NULL;
 
@@ -69,6 +74,7 @@ GString* find_python_executable(const GString *input_path) {
 Call the change_speed method in our python source.
 */
 int call_change_speed_method(int speed){
+    DEBUG_PRINT("C host: call_change_speed_method()\n");
     PyObject *pResult = PyObject_CallMethod(pSpeechDispatchClassInstance, "change_speed", "i", speed);
     if (pResult != NULL) {
         Py_DECREF(pResult);
@@ -80,6 +86,7 @@ int call_change_speed_method(int speed){
 Call the change_voice method in our python source.
 */
 int call_change_voice_method(const char* voice){
+    DEBUG_PRINT("C host: call_change_voice_method()\n");
     PyObject *pResult = PyObject_CallMethod(pSpeechDispatchClassInstance, "change_voice", "s", voice);
     if (pResult != NULL) {
         Py_DECREF(pResult);
@@ -88,6 +95,7 @@ int call_change_voice_method(const char* voice){
 }
 
 void process_list_result(PyObject *result) {
+    DEBUG_PRINT("C host: process_list_result()\n");
     // Verify the result is actually a Python list
     if (!PyList_Check(result)) {
         PyErr_SetString(PyExc_TypeError, "Expected result to be a list");
@@ -131,12 +139,14 @@ void process_list_result(PyObject *result) {
                language ? language : "UNKNOWN");
         // TODO: create a global copy that can be returned in the module_list_voices function in _server.
     }
+    DEBUG_PRINT("C host: process_list_result() - Done\n");
 }
 
 /*
 Call the list_voices method in our python source and get a list of returned voices.
 */
 int call_list_voices_method(){
+    DEBUG_PRINT("C host: call_list_voices_method()\n");
     PyObject *pResult = PyObject_CallMethod(pSpeechDispatchClassInstance, "list_voices", NULL);
     if (pResult != NULL) {
         process_list_result(pResult);
@@ -148,13 +158,24 @@ int call_list_voices_method(){
 /*
 Call the speak method in our python source and get returned data.
 */
-int call_speak_method(const char* text){
+// int call_speak_method(const char* text, size_t bytes){
+//     DEBUG_PRINT("C host: call_speak_method() - stub\n");
+//     PyObject *pResult = PyObject_CallMethod(pSpeechDispatchClassInstance, "speak", "s#", text, bytes);
+//     if (pResult != NULL) {
+//         Py_DECREF(pResult);
+//     }
+//     return 1;
+// }
 
+int call_speak_method(const char* text, size_t bytes){
+    DEBUG_PRINT("C host: call_speak_method()\n");
+    DEBUG_PRINT("C host: text: %s\n", text);
     clock_t gen;
     clock_t end;
 
     gen = clock();
-    PyObject* pGenerator = PyObject_CallMethod(pSpeechDispatchClassInstance, "speak", "s", text);//TODO: this should just return a generator and not do any actual processing but need to check.
+    //this should just return a generator and not do any actual processing.
+    PyObject* pGenerator = PyObject_CallMethod(pSpeechDispatchClassInstance, "speak", "s#", text, bytes);
     end = clock();
     double seconds = (double)(end - gen) / CLOCKS_PER_SEC;
     DEBUG_PRINT("PyObject_CallMethod: Took %f seconds\n", seconds);
@@ -165,12 +186,18 @@ int call_speak_method(const char* text){
         return -1;
     }
 
+    if (!PyGen_Check(pGenerator)){
+        fprintf(stderr, "ERROR: python Speak() method must return a generator(use a yield)\n");
+        return -1;
+    }
+
     PyObject* result=NULL;
 
     gen = clock();
     // loop throught the returned generator.
+    // Most of the python processing will happen during PyIter_Next
     while ((result = PyIter_Next(pGenerator))) {
-
+        DEBUG_PRINT("C host: PyIter_Next()\n");
         // It should return a list.
         if (!PyList_Check(result)) {
             PyErr_SetString(PyExc_TypeError, "Expected method to return a list");
@@ -195,6 +222,7 @@ int call_speak_method(const char* text){
 
             long val = PyLong_AsLong(item);
             if (val == -1 && PyErr_Occurred()) {
+                DEBUG_PRINT("C host: PyErr_Occurred()\n");
                 //free(c_array);
                 g_array_unref(output_array);
                 Py_XDECREF(result);
@@ -204,6 +232,7 @@ int call_speak_method(const char* text){
 
             // Bounds check for C short overflow (-32768 to 32767)
             if (val < SHRT_MIN || val > SHRT_MAX) {
+                DEBUG_PRINT("C host: Bounds check()\n");
                 PyErr_SetString(PyExc_OverflowError, "Value out of range for C short");
                 //free(c_array);
                 g_array_unref(output_array);
@@ -216,13 +245,15 @@ int call_speak_method(const char* text){
         }
 
         end = clock();
+        double aseconds = (double)(end - gen) / CLOCKS_PER_SEC;
+        DEBUG_PRINT("PyIter_Next took %f seconds\n", aseconds);
 
         // print some of the output array.
-        g_printerr("output array: \n");
+        DEBUG_PRINT("C host: output array:\n");
         for (int i = 0; i < 10 && i < size; i++) {
-            g_printerr("%d ", g_array_index(output_array, short, i));
+            DEBUG_PRINT("%d ", g_array_index(output_array, short, i));
         }
-        g_printerr("\n");
+        DEBUG_PRINT("\n");
 
         //push to the speak queue here
         if (output_array!=NULL){
@@ -231,7 +262,9 @@ int call_speak_method(const char* text){
 
             //The output_array array will be freed by the _generation_thread or free_GeneratePayload on destroy.
             // TODO: make sure to handle the mark correctly. for now just setting it to ""
+            DEBUG_PRINT("Sending output\n");
             send_wav(output_array, ""); // on the last chunk send the mark also.
+            DEBUG_PRINT("Done Sending output\n");
 
             ahead_add(output_array->len/24000.0);
             ahead_print();
@@ -421,6 +454,19 @@ int configure_python(const char* venv_path_string) {
     return 0;
 }
 
+int setup_python_threads(){
+    // Save current thread state and release GIL from main thread
+    main_tstate = PyEval_SaveThread();
+
+    // Create a new PyThreadState for this thread using the main interpreter state
+    server_tstate = PyThreadState_New(main_tstate->interp);
+
+    // Create a new PyThreadState for worker thread using the main interpreter state
+    worker_tstate = PyThreadState_New(main_tstate->interp);
+
+    return 1;
+}
+
 int setup_python(){
 
     if (configure_python(venv_path->str) == -1){
@@ -430,14 +476,23 @@ int setup_python(){
 
     if (run_python_module(source_path->str) == -1){
         Py_XDECREF(pSpeechDispatchClassInstance);
+        pSpeechDispatchClassInstance = NULL;
         Py_Finalize();
         return -1;
     }
+
+    setup_python_threads();
+
     return 0;
 }
 
 int cleanup_python(){
     // Clean up and finalize
+    PyEval_RestoreThread(main_tstate);
+    PyThreadState_Clear(server_tstate);
+    PyThreadState_Delete(server_tstate);
+    PyThreadState_Clear(worker_tstate);
+    PyThreadState_Delete(worker_tstate);
     Py_XDECREF(pSpeechDispatchClassInstance);
     pSpeechDispatchClassInstance = NULL;
     Py_Finalize();
