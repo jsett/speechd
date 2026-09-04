@@ -41,7 +41,7 @@ int model_change_voice(const char *var, const char *val);
 int model_change_speed(const char *var, const char *val);
 int add_generate_speech_task(const char* data, size_t bytes);
 int model_stop_generation();
-void send_wav(GArray *wav, char *mark);
+void send_wav(GArray *wav, int bitrate, const char *mark);
 void ahead_add(float val);
 void ahead_set(float val);
 float ahead_get();

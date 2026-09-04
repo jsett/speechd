@@ -158,15 +158,6 @@ int call_list_voices_method(){
 /*
 Call the speak method in our python source and get returned data.
 */
-// int call_speak_method(const char* text, size_t bytes){
-//     DEBUG_PRINT("C host: call_speak_method() - stub\n");
-//     PyObject *pResult = PyObject_CallMethod(pSpeechDispatchClassInstance, "speak", "s#", text, bytes);
-//     if (pResult != NULL) {
-//         Py_DECREF(pResult);
-//     }
-//     return 1;
-// }
-
 int call_speak_method(const char* text, size_t bytes){
     DEBUG_PRINT("C host: call_speak_method()\n");
     DEBUG_PRINT("C host: text: %s\n", text);
@@ -191,52 +182,87 @@ int call_speak_method(const char* text, size_t bytes){
         return -1;
     }
 
-    PyObject* result=NULL;
+    PyObject* pResult=NULL;
 
     gen = clock();
     // loop throught the returned generator.
     // Most of the python processing will happen during PyIter_Next
-    while ((result = PyIter_Next(pGenerator))) {
+    while ((pResult = PyIter_Next(pGenerator))) {
         DEBUG_PRINT("C host: PyIter_Next()\n");
-        // It should return a list.
-        if (!PyList_Check(result)) {
-            PyErr_SetString(PyExc_TypeError, "Expected method to return a list");
+
+        // Verify that our generator returned a dict.
+        if (!pResult || !PyDict_Check(pResult)) {
+            fprintf(stderr, "Error: Expected a non-null Python dictionary.\n");
+            Py_XDECREF(pResult);
             Py_XDECREF(pGenerator);
-            Py_XDECREF(result);
+            return -1;
+        }
+
+        // Verify that our dict has a "rate" key. if so get the value.
+        PyObject *pRate = PyDict_GetItemString(pResult, "rate"); // Borrowed reference
+        if (!pRate || !PyLong_Check(pRate)) {
+            fprintf(stderr, "Error: 'rate' key missing or not an integer.\n");
+            Py_XDECREF(pResult);
+            Py_XDECREF(pGenerator);
+            return -1;
+        }
+
+        int sample_rate = (int)PyLong_AsLong(pRate);
+
+        // Verify that our dict has a "mark" key if so get the value
+        PyObject *pMark = PyDict_GetItemString(pResult, "mark"); // Borrowed reference
+        if (!pMark || !PyUnicode_Check(pMark)) {
+            fprintf(stderr, "Error: 'mark' key missing or not a string.\n");
+            Py_XDECREF(pResult);
+            Py_XDECREF(pGenerator);
+            return -1;
+        }
+
+        const char *temp_mark = PyUnicode_AsUTF8(pMark);
+        if (!temp_mark) {
+            fprintf(stderr, "Error: failed to get 'mark' string\n");
+            Py_XDECREF(pResult);
+            Py_XDECREF(pGenerator);
+            return -1; // Python exception raised
+        }
+
+        // Verify that our dict has a "audio" key and that it is a list.
+        PyObject *pAudio = PyDict_GetItemString(pResult, "audio"); // Borrowed reference
+        if (!pAudio || !PyList_Check(pAudio)) {
+            fprintf(stderr, "Error: 'audio' key missing or not a list.\n");
+            Py_XDECREF(pResult);
+            Py_XDECREF(pGenerator);
             return -1;
         }
 
         // Created memory for our buffer.
-        Py_ssize_t size = PyList_Size(result);
+        Py_ssize_t size = PyList_Size(pAudio);
         GArray *output_array = g_array_sized_new(FALSE, FALSE, sizeof(short), size);
         if (!output_array){
-            PyErr_NoMemory();
-            Py_DECREF(result);
+            DEBUG_PRINT("Error: out of memory\n");
+            Py_XDECREF(pResult);
+            Py_XDECREF(pGenerator);
             return -1;
         }
 
-        // Process each element
+        // Process each element in our audio list
         for (Py_ssize_t i = 0; i < size; i++) {
-            // PyList_GetItem returns a BORROWED reference
-            PyObject *item = PyList_GetItem(result, i);
+            PyObject *item = PyList_GetItem(pAudio, i); // BORROWED reference
 
             long val = PyLong_AsLong(item);
             if (val == -1 && PyErr_Occurred()) {
-                DEBUG_PRINT("C host: PyErr_Occurred()\n");
-                //free(c_array);
+                DEBUG_PRINT("Python audio list is formated wrong\n");
                 g_array_unref(output_array);
-                Py_XDECREF(result);
+                Py_XDECREF(pResult);
                 Py_XDECREF(pGenerator);
                 return -1;
             }
 
             // Bounds check for C short overflow (-32768 to 32767)
             if (val < SHRT_MIN || val > SHRT_MAX) {
-                DEBUG_PRINT("C host: Bounds check()\n");
-                PyErr_SetString(PyExc_OverflowError, "Value out of range for C short");
-                //free(c_array);
+                DEBUG_PRINT("List must be shorts(-32768 to 32767)\n");
                 g_array_unref(output_array);
-                Py_XDECREF(result);
+                Py_XDECREF(pResult);
                 Py_XDECREF(pGenerator);
                 return -1;
             }
@@ -245,28 +271,16 @@ int call_speak_method(const char* text, size_t bytes){
         }
 
         end = clock();
-        double aseconds = (double)(end - gen) / CLOCKS_PER_SEC;
-        DEBUG_PRINT("PyIter_Next took %f seconds\n", aseconds);
 
-        // print some of the output array.
-        DEBUG_PRINT("C host: output array:\n");
-        for (int i = 0; i < 10 && i < size; i++) {
-            DEBUG_PRINT("%d ", g_array_index(output_array, short, i));
-        }
-        DEBUG_PRINT("\n");
-
-        //push to the speak queue here
+        // push to the speak queue here
         if (output_array!=NULL){
             double seconds = (double)(end - gen) / CLOCKS_PER_SEC;
-            DEBUG_PRINT("Generated %f seconds of audio in %f seconds\n", output_array->len/24000.0, seconds);
+            DEBUG_PRINT("Generated %f seconds of audio in %f seconds\n", output_array->len/sample_rate, seconds);
 
             //The output_array array will be freed by the _generation_thread or free_GeneratePayload on destroy.
-            // TODO: make sure to handle the mark correctly. for now just setting it to ""
-            DEBUG_PRINT("Sending output\n");
-            send_wav(output_array, ""); // on the last chunk send the mark also.
-            DEBUG_PRINT("Done Sending output\n");
+            send_wav(output_array, sample_rate,  temp_mark);
 
-            ahead_add(output_array->len/24000.0);
+            ahead_add(output_array->len/sample_rate);
             ahead_print();
         }
 
@@ -286,14 +300,14 @@ int call_speak_method(const char* text, size_t bytes){
         if (stop_get())
             break;
 
-        Py_XDECREF(result); // Free each yielded item
+        Py_XDECREF(pResult);// Free each yielded item
 
         gen = clock();
     }
 
 
     // Cleanup and return
-    Py_DECREF(pGenerator);
+    Py_XDECREF(pGenerator);
     return 0;
 }
 

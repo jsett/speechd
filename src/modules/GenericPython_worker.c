@@ -31,6 +31,7 @@ enum wavCommands { BEGIN, STOP, DATA };
 typedef struct {
     enum wavCommands cmd;
     GArray *op;
+    int bitrate;
     GString *mark;
 } WavPayload;
 
@@ -84,9 +85,10 @@ int model_change_speed(const char *var, const char *val){
 }
 
 // adds a wave to our wav_queue
-void send_wav(GArray *wav, char *mark){
+void send_wav(GArray *wav, int bitrate, const char *mark){
     WavPayload *wp = g_new(WavPayload, 1);
     wp->cmd = DATA;
+    wp->bitrate = bitrate;
     wp->op = wav;
     if (mark == NULL){
         wp->mark = g_string_new("");
@@ -288,8 +290,9 @@ void *_play_wav_thread(void *nothing)
             DEBUG_PRINT("wav_thread: send_samples\n");
             GArray *op = (GArray *) wp->op;
             GString *mark = wp->mark;
-            send_samples((short*)op->data, op->len, 24000);
-            ahead_add(-1 * ((float)op->len/24000.0));
+            int bitrate = wp->bitrate;
+            send_samples((short*)op->data, op->len, bitrate);
+            ahead_add(-1 * ((float)op->len/bitrate));
             if (mark->len != 0){
                 module_report_index_mark(mark->str);
             }
